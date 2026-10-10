@@ -1,0 +1,33 @@
+{
+  "market": {
+    "symbol": "XAUUSD",
+    "timeframe": "5m",
+    "candle_count": 100
+  },
+  "strategy": {
+    "ema_fast": 20,
+    "ema_slow": 50,
+    "rsi_period": 14,
+    "atr_period": 14,
+    "rsi_buy_min": 50,
+    "rsi_buy_max": 70,
+    "rsi_sell_min": 30,
+    "rsi_sell_max": 50
+  },
+  "risk": {
+    "atr_stop_multiplier": 1.5,
+    "atr_target_multiplier": 3.0
+  },
+  "data": {
+    "max_candle_age_minutes": {
+      "5m": 20,
+      "15m": 45,
+      "1h": 90,
+      "4h": 480,
+      "1d": 4320
+    }
+  },
+  "trading": {
+    "enabled": false
+  }
+}

@@ -1,0 +1,24 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+logs/
+
+# Temporary and backup files
+*.tmp
+*.bak
+*.backup
+
+# Test cache
+.pytest_cache/
