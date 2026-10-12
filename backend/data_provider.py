@@ -57,10 +57,7 @@ async def fetch_candles():
             "4h": 240,
             "1d": 1440,
         }
-        interval = timeframe_minutes.get(timeframe, 5)
-        start_time = datetime.now(timezone.utc) - timedelta(
-            minutes=candle_count * interval + 2 * interval
-        )
+        start_time = datetime.now(timezone.utc)
 
         candles = await account.get_historical_candles(
             symbol, timeframe, start_time, candle_count
