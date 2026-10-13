@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: forex-signal-tracker-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 backend.api:app
+    healthCheckPath: /health
+    envVars:
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: METAAPI_ACCOUNT_ID
+        sync: false

@@ -22,3 +22,29 @@ logs/
 
 # Test cache
 .pytest_cache/
+.venv_old/
+backups/
+data/*.jsonl
+*.lock
+
+# Local backups and intermediate development snapshots
+*.before_*
+*.before-*
+*.step*-backup
+*.step*.backup
+*.backup_*
+*.backup_before_*
+*.debug-backup
+*.bak*
+*.backup*
+*.tmp
+
+# Local account diagnostics and test output
+/check_account.py
+/check_account_type.py
+/test-results*
+/test-results.log
+
+# Local runtime data and logs
+/logs/
+/data/

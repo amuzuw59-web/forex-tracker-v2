@@ -202,4 +202,23 @@ def analyze_candles(candles):
         "stop_loss": stop_loss,
         "take_profit": take_profit,
         "trading_enabled": False,
+        "risk_validation": {
+            "status": (
+                "not_applicable"
+                if signal == "HOLD"
+                else "pending_broker_value_verification"
+            ),
+            "monetary_loss_estimate": None,
+            "position_size_calculated": False,
+            "order_execution_enabled": False,
+            "message": (
+                "No trade setup to validate."
+                if signal == "HOLD"
+                else (
+                    "Signal levels are informational only. "
+                    "Broker tick-value units and trading costs must be "
+                    "verified before calculating monetary risk or volume."
+                )
+            ),
+        },
     }

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,15 +39,22 @@ async def fetch_candles():
     timeframe = market.get("timeframe", "5m")
     candle_count = int(market.get("candle_count", 100))
 
+    total_started = time.monotonic()
     api = MetaApi(token)
     connection = None
 
     try:
+        stage_started = time.monotonic()
         account = await api.metatrader_account_api.get_account(account_id)
+        print(f"[TIMING] get_account: {time.monotonic() - stage_started:.2f}s", flush=True)
         connection = account.get_rpc_connection()
 
+        stage_started = time.monotonic()
         await connection.connect()
-        await connection.wait_synchronized()
+        print(f"[TIMING] connect: {time.monotonic() - stage_started:.2f}s", flush=True)
+        stage_started = time.monotonic()
+        await connection.wait_synchronized(timeout_in_seconds=15)
+        print(f"[TIMING] synchronization: {time.monotonic() - stage_started:.2f}s", flush=True)
 
         timeframe_minutes = {
             "1m": 1,
@@ -57,11 +65,29 @@ async def fetch_candles():
             "4h": 240,
             "1d": 1440,
         }
-        start_time = datetime.now(timezone.utc)
-
+        stage_started = time.monotonic()
         candles = await account.get_historical_candles(
-            symbol, timeframe, start_time, candle_count
+            symbol, timeframe, None, candle_count
         )
+
+        print(f"[DEBUG] Requested symbol: {symbol}", flush=True)
+        print(f"[DEBUG] Requested timeframe: {timeframe}", flush=True)
+        print(f"[DEBUG] Candle count returned: {len(candles or [])}", flush=True)
+
+        if candles:
+            print(
+                f"[DEBUG] First candle timestamp: {candles[0].get('time')}",
+                flush=True,
+            )
+            print(
+                f"[DEBUG] Last candle timestamp: {candles[-1].get('time')}",
+                flush=True,
+            )
+            print(
+                f"[DEBUG] Current UTC time: {datetime.now(timezone.utc).isoformat()}",
+                flush=True,
+            )
+        print(f"[TIMING] historical candles: {time.monotonic() - stage_started:.2f}s", flush=True)
 
         if not candles:
             raise RuntimeError(
@@ -110,16 +136,34 @@ async def fetch_candles():
                     f"Latest closed candle is stale: {age_minutes:.1f} minutes old."
                 )
 
+        print(f"[TIMING] total data provider: {time.monotonic() - total_started:.2f}s", flush=True)
         return symbol, timeframe, df
 
     finally:
         if connection is not None:
             try:
-                await connection.close()
-            except Exception:
-                pass
-        api.close()
+                print("[CLEANUP] Closing RPC connection...", flush=True)
+                await asyncio.wait_for(connection.close(), timeout=5)
+                print("[CLEANUP] RPC connection closed.", flush=True)
+            except Exception as exc:
+                print(f"[CLEANUP] RPC close failed/timed out: {exc!r}", flush=True)
 
+        try:
+            print("[CLEANUP] Stopping MetaApi background jobs...", flush=True)
+            if hasattr(api, "_latency_monitor"):
+                api._metaapi_websocket_client.remove_latency_listener(
+                    api._latency_monitor
+                )
+            api._metaapi_websocket_client.stop()
+            api._terminal_hash_manager._stop()
+
+            print("[CLEANUP] Closing WebSocket client...", flush=True)
+            await asyncio.wait_for(
+                api._metaapi_websocket_client.close(), timeout=5
+            )
+            print("[CLEANUP] WebSocket client closed.", flush=True)
+        except Exception as exc:
+            print(f"[CLEANUP] MetaApi shutdown failed/timed out: {exc!r}", flush=True)
 
 def get_candles():
     """Synchronous wrapper for scripts and Flask routes."""

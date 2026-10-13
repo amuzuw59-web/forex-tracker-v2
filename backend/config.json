@@ -28,6 +28,16 @@
     }
   },
   "trading": {
-    "enabled": false
+    "enabled": false,
+    "require_demo_account": true,
+    "require_manual_confirmation": true,
+    "max_open_positions": 1,
+    "max_risk_percent": 0.5,
+    "submission_enabled": false
+  },
+  "monitor": {
+    "poll_seconds": 60,
+    "signal_history_file": "data/signal_history.jsonl",
+    "max_history_entries": 5000
   }
 }
