@@ -99,7 +99,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["status"], "blocked")
 
-    def test_demo_execute_requires_manual_confirmation(self):
+    def test_demo_execute_blocks_without_trade_specific_approval(self):
         with patch.dict(
             "os.environ",
             {"DEMO_EXECUTION_API_ENABLED": "true",
@@ -111,7 +111,7 @@ class TestAPI(unittest.TestCase):
                 json={"manual_confirmation": False},
             )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
         data = response.get_json()
         self.assertEqual(data["status"], "blocked")
         self.assertFalse(data["automatic_order_submitted"])
@@ -164,11 +164,11 @@ class TestAPI(unittest.TestCase):
                 json={"manual_confirmation": True},
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 409)
         self.assertFalse(
             response.get_json().get("automatic_order_submitted", False)
         )
-        mock_execute.assert_called_once()
+        mock_execute.assert_not_called()
 
     @patch("backend.api.get_candles")
     def test_demo_execute_handles_missing_market_data(self, mock_get_candles):
@@ -185,10 +185,11 @@ class TestAPI(unittest.TestCase):
                 json={"manual_confirmation": True},
             )
 
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 409)
         self.assertFalse(
             response.get_json().get("automatic_order_submitted", False)
         )
+        mock_get_candles.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

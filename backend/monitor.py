@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,10 +16,34 @@ CONFIG_PATH = BASE_DIR / "backend" / "config.json"
 STOP_EVENT = None
 STOP_LOOP = None
 
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+MONITOR_LOG = LOG_DIR / "monitor.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
+
+root_logger = logging.getLogger()
+if not any(
+    getattr(handler, "_forex_monitor_file_handler", False)
+    for handler in root_logger.handlers
+):
+    file_handler = RotatingFileHandler(
+        MONITOR_LOG,
+        maxBytes=2_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s"
+        )
+    )
+    file_handler._forex_monitor_file_handler = True
+    root_logger.addHandler(file_handler)
+
 logger = logging.getLogger("forex-monitor")
 
 

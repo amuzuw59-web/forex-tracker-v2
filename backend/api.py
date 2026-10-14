@@ -101,66 +101,13 @@ def execute_demo():
             "reason": "Authentication required.",
             "automatic_order_submitted": False,
         }), 401
-    import asyncio
-
-    payload = request.get_json(silent=True) or {}
-
-    if payload.get("manual_confirmation") is not True:
-        return jsonify({
-            "status": "blocked",
-            "reason": "Explicit manual confirmation is required.",
-            "automatic_order_submitted": False,
-        }), 400
-
-    try:
-        symbol, timeframe, candles = get_candles()
-
-        if candles is None or candles.empty:
-            return jsonify({
-                "status": "blocked",
-                "reason": "No market candles are available.",
-                "automatic_order_submitted": False,
-            }), 503
-
-        candle_time = candles.iloc[-1]["datetime"]
-        if hasattr(candle_time, "isoformat"):
-            candle_time = candle_time.isoformat()
-
-        validate_signal_freshness(candle_time, timeframe)
-        signal = analyze_candles(candles)
-
-        if signal.get("signal") not in ("BUY", "SELL"):
-            return jsonify({
-                "status": "blocked",
-                "reason": "No actionable BUY or SELL signal.",
-                "signal": signal.get("signal"),
-                "automatic_order_submitted": False,
-            }), 200
-
-        result = asyncio.run(
-            execute_demo_signal(
-                signal=signal,
-                candle_id=f"{symbol}:{timeframe}:{candle_time}",
-                candle_time=candle_time,
-                manual_confirmation=True,
-            )
-        )
-
-        return jsonify(result), 200
-
-    except ValueError as exc:
-        return jsonify({
-            "status": "blocked",
-            "reason": str(exc),
-            "automatic_order_submitted": False,
-        }), 400
-    except Exception:
-        app.logger.exception("Demo execution endpoint failed")
-        return jsonify({
-            "status": "error",
-            "reason": "Demo execution request failed.",
-            "automatic_order_submitted": False,
-        }), 500
+    # Fail closed until approval is bound to a specific trade proposal.
+    # A client-supplied boolean is not sufficient trade approval.
+    return jsonify({
+        "status": "blocked",
+        "reason": "Trade-specific approval workflow is not implemented.",
+        "automatic_order_submitted": False,
+    }), 409
 
 if __name__ == "__main__":
     app.run(
