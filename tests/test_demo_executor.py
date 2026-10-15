@@ -11,6 +11,40 @@ from backend.demo_executor import (
 
 
 class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
+    async def test_unverified_monetary_risk_blocks_submission(self):
+        config = {
+            "trading": {
+                "enabled": True,
+                "submission_enabled": True,
+                "monetary_risk_independently_verified": False,
+                "require_demo_account": True,
+                "require_manual_confirmation": True,
+                "max_open_positions": 1,
+                "max_risk_percent": 0.5,
+            },
+            "market": {"symbol": "XAUUSD", "timeframe": "5m"},
+            "data": {"max_candle_age_minutes": {"5m": 20}},
+        }
+
+        with (
+            patch("backend.demo_executor.load_config", return_value=config),
+            patch("backend.demo_executor.MetaApi") as meta_api,
+        ):
+            result = await execute_demo_signal(
+                {"signal": "BUY"},
+                "risk-verification-test",
+                datetime.now(timezone.utc).isoformat(),
+                manual_confirmation=True,
+            )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(
+            result["risk_validation"],
+            "pending_broker_value_verification",
+        )
+        self.assertFalse(result["automatic_order_submitted"])
+        meta_api.assert_not_called()
+
 
     async def test_disabled_trading_stops_before_broker_connection(self):
         with patch(

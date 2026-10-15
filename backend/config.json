@@ -33,7 +33,8 @@
     "require_manual_confirmation": true,
     "max_open_positions": 1,
     "max_risk_percent": 0.5,
-    "submission_enabled": false
+    "submission_enabled": false,
+    "monetary_risk_independently_verified": false
   },
   "monitor": {
     "poll_seconds": 60,

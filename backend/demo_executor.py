@@ -246,6 +246,21 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
                 "reason": "Explicit manual confirmation is required.",
             }
 
+    if (
+        not prepare_only
+        and trading.get("submission_enabled", False) is True
+        and trading.get("monetary_risk_independently_verified", False) is not True
+    ):
+        return {
+            "status": "blocked",
+            "reason": (
+                "Monetary risk is unverified: broker tick-value units and "
+                "trading costs must be independently verified before submission."
+            ),
+            "risk_validation": "pending_broker_value_verification",
+            "automatic_order_submitted": False,
+        }
+
     token = os.getenv("METAAPI_TOKEN")
     account_id = os.getenv("METAAPI_ACCOUNT_ID")
     if not token or not account_id:
@@ -435,6 +450,20 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
                     "Validation passed. Submission remains disabled by "
                     "the independent submission switch."
                 ),
+            }
+
+        # Fail closed unless monetary risk verification is explicitly enabled.
+        # An estimate alone is not proof that broker costs and tick-value units
+        # have been independently verified.
+        if trading.get("monetary_risk_independently_verified", False) is not True:
+            return {
+                "status": "blocked",
+                "reason": (
+                    "Monetary risk is unverified: broker tick-value units and "
+                    "trading costs must be independently verified before submission."
+                ),
+                "risk_validation": "pending_broker_value_verification",
+                "automatic_order_submitted": False,
             }
 
         submission = await submit_signal_once(
