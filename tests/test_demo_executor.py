@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from backend.demo_executor import (
     calculate_volume,
+    calculate_volume_from_tick_value,
     execute_demo_signal,
     validate_signal_freshness,
 )
@@ -530,3 +531,37 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTickValueVolumeSafety(unittest.TestCase):
+    def setUp(self):
+        self.valid = {
+            "equity": 10000,
+            "entry_price": 4200,
+            "stop_loss": 4190,
+            "tick_size": 0.01,
+            "loss_tick_value": 1,
+            "risk_percent": 0.5,
+            "min_volume": 0.01,
+            "max_volume": 100,
+            "volume_step": 0.01,
+        }
+
+    def test_volume_stays_within_risk_limit(self):
+        result = calculate_volume_from_tick_value(**self.valid)
+        self.assertLessEqual(result["estimated_loss"], 50.0)
+        self.assertGreaterEqual(result["volume"], 0.01)
+        self.assertEqual(
+            result["risk_basis"],
+            "broker_quote_loss_tick_value",
+        )
+
+    def test_minimum_volume_above_risk_budget_is_rejected(self):
+        values = {**self.valid, "equity": 100}
+        with self.assertRaisesRegex(ValueError, "risk limit"):
+            calculate_volume_from_tick_value(**values)
+
+    def test_zero_loss_tick_value_is_rejected(self):
+        values = {**self.valid, "loss_tick_value": 0}
+        with self.assertRaisesRegex(ValueError, "loss_tick_value"):
+            calculate_volume_from_tick_value(**values)
