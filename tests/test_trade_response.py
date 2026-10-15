@@ -78,5 +78,14 @@ class TestTradeResponse(unittest.TestCase):
 
         self.assertEqual(result["status"], "uncertain")
 
+
+    def test_no_changes_response_is_not_order_success(self):
+        result = validate_trade_response({
+            "numericCode": 10025,
+            "stringCode": "TRADE_RETCODE_NO_CHANGES",
+            "message": "No changes",
+        })
+        self.assertNotEqual(result["status"], "response_success")
+
 if __name__ == "__main__":
     unittest.main()

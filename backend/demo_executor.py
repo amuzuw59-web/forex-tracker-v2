@@ -203,7 +203,7 @@ def calculate_volume_from_tick_value(
         "risk_basis": "broker_quote_loss_tick_value",
     }
 
-async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmation=False):
+async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmation=False, prepare_only=False, expected_proposal=None):
     """Validate a signal and submit only when explicitly enabled.
 
     This function deliberately refuses execution when the configured
@@ -213,8 +213,15 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
     config = load_config()
     trading = config["trading"]
 
-    if not trading.get("enabled", False):
+    if not trading.get("enabled", False) and not prepare_only:
         return {"status": "blocked", "reason": "Trading is disabled."}
+
+    if prepare_only and trading.get("submission_enabled", False):
+        return {
+            "status": "blocked",
+            "reason": "Preflight mode requires submission to remain disabled.",
+            "automatic_order_submitted": False,
+        }
 
     if not trading.get("require_demo_account", True):
         return {"status": "blocked", "reason": "Demo-only protection must remain enabled."}
@@ -232,7 +239,7 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
     except ValueError as exc:
         return {"status": "blocked", "reason": str(exc)}
 
-    if trading.get("require_manual_confirmation", True):
+    if not prepare_only and trading.get("require_manual_confirmation", True):
         if manual_confirmation is not True:
             return {
                 "status": "blocked",
@@ -315,10 +322,103 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
             volume_step=float(spec["volumeStep"]),
         )
 
-        # Independent submission switch: disabled by default.
-        if not trading.get("submission_enabled", False):
+        # Match the approved proposal against fresh broker-derived values.
+        # Any mismatch blocks execution before the submission boundary.
+        if expected_proposal is not None:
+            expected_values = {
+                "symbol": (expected_proposal.get("symbol"), symbol),
+                "side": (expected_proposal.get("signal"), side),
+                "candle_id": (
+                    str(expected_proposal.get("candle_id", "")),
+                    str(candle_id),
+                ),
+            }
+
+            for field, (expected, actual) in expected_values.items():
+                if expected != actual:
+                    return {
+                        "status": "blocked",
+                        "reason": (
+                            f"Approved proposal mismatch: {field} changed."
+                        ),
+                        "automatic_order_submitted": False,
+                    }
+
+            tick_size = float(spec["tickSize"])
+            price_checks = {
+                "entry": (expected_proposal.get("entry_price"), entry),
+                "stop_loss": (
+                    expected_proposal.get("stop_loss"), stop_loss
+                ),
+                "take_profit": (
+                    expected_proposal.get("take_profit"), take_profit
+                ),
+            }
+
+            for field, (expected, actual) in price_checks.items():
+                if (
+                    isinstance(expected, bool)
+                    or not isinstance(expected, (int, float))
+                    or not math.isfinite(expected)
+                    or not math.isclose(
+                        float(expected),
+                        float(actual),
+                        rel_tol=0.0,
+                        abs_tol=tick_size / 2,
+                    )
+                ):
+                    return {
+                        "status": "blocked",
+                        "reason": (
+                            f"Approved proposal mismatch: {field} changed."
+                        ),
+                        "automatic_order_submitted": False,
+                    }
+
+            risk_checks = {
+                "volume": (expected_proposal.get("volume"), risk["volume"]),
+                "estimated_loss": (
+                    expected_proposal.get("estimated_loss"),
+                    risk["estimated_loss"],
+                ),
+                "maximum_allowed_loss": (
+                    expected_proposal.get("maximum_allowed_loss"),
+                    risk["maximum_allowed_loss"],
+                ),
+                "risk_percent": (
+                    expected_proposal.get("risk_percent"),
+                    risk["risk_percent"],
+                ),
+            }
+
+            for field, (expected, actual) in risk_checks.items():
+                if (
+                    isinstance(expected, bool)
+                    or not isinstance(expected, (int, float))
+                    or not math.isfinite(expected)
+                    or not math.isclose(
+                        float(expected),
+                        float(actual),
+                        rel_tol=1e-6,
+                        abs_tol=1e-6,
+                    )
+                ):
+                    return {
+                        "status": "blocked",
+                        "reason": (
+                            f"Approved proposal mismatch: {field} changed."
+                        ),
+                        "automatic_order_submitted": False,
+                    }
+
+        # Preflight must never submit. Normal execution also respects the
+        # independent submission switch.
+        if prepare_only or not trading.get("submission_enabled", False):
             return {
-                "status": "validated_not_submitted",
+                "status": (
+                    "proposal_ready" if prepare_only
+                    else "validated_not_submitted"
+                ),
                 "symbol": symbol,
                 "side": side,
                 "entry_price": entry,
@@ -329,6 +429,9 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
                 "freshness": freshness,
                 "automatic_order_submitted": False,
                 "message": (
+                    "Broker validation completed. No order was submitted."
+                    if prepare_only
+                    else
                     "Validation passed. Submission remains disabled by "
                     "the independent submission switch."
                 ),

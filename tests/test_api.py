@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pandas as pd
 
@@ -190,6 +190,256 @@ class TestAPI(unittest.TestCase):
             response.get_json().get("automatic_order_submitted", False)
         )
         mock_get_candles.assert_not_called()
+
+
+    def test_demo_proposal_requires_authentication(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            },
+        ):
+            response = self.client.post("/api/demo/proposal", json={})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.get_json()["automatic_order_submitted"])
+
+    @patch("backend.api.execute_demo_signal", new_callable=AsyncMock)
+    @patch("backend.api._build_signal_payload")
+    def test_demo_proposal_creates_broker_validated_proposal(
+        self, mock_build_payload, mock_execute
+    ):
+        import pandas as pd
+
+        candle_time = pd.Timestamp.now(tz="UTC").floor("5min").isoformat()
+        mock_build_payload.return_value = {
+            "status": "ok",
+            "symbol": "XAUUSD",
+            "timeframe": "5m",
+            "latest_candle": candle_time,
+            "signal": {
+                "signal": "BUY",
+                "stop_loss": 4090.0,
+                "take_profit": 4120.0,
+            },
+        }
+        mock_execute.return_value = {
+            "status": "proposal_ready",
+            "entry_price": 4100.0,
+            "stop_loss": 4090.0,
+            "take_profit": 4120.0,
+            "volume": 0.01,
+            "estimated_loss": 1.0,
+            "maximum_allowed_loss": 500.0,
+            "risk_percent": 0.5,
+        }
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            },
+        ):
+            response = self.client.post(
+                "/api/demo/proposal",
+                headers={"Authorization": "Bearer test-only-secret"},
+                json={},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "proposal_ready")
+        self.assertTrue(data["approval_required"])
+        self.assertFalse(data["automatic_order_submitted"])
+        self.assertTrue(data["proposal"]["proposal_id"])
+        self.assertEqual(data["proposal"]["symbol"], "XAUUSD")
+        self.assertEqual(data["proposal"]["volume"], 0.01)
+        mock_execute.assert_awaited_once()
+
+    def test_demo_approval_rejects_unknown_proposal(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            },
+        ):
+            response = self.client.post(
+                "/api/demo/approve",
+                headers={"Authorization": "Bearer test-only-secret"},
+                json={"proposal_id": "unknown-proposal", "approve": True},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.get_json()["automatic_order_submitted"])
+
+    def test_demo_approval_is_one_time_only(self):
+        import time
+        from backend import api as api_module
+
+        proposal_id = "test-proposal-one-time"
+        proposal = {
+            "proposal_id": proposal_id,
+            "created_at": time.monotonic(),
+            "approved": False,
+        }
+
+        with api_module._demo_proposals_lock:
+            api_module._demo_proposals[proposal_id] = proposal
+
+        headers = {"Authorization": "Bearer test-only-secret"}
+        body = {"proposal_id": proposal_id, "approve": True}
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            },
+        ):
+            first = self.client.post(
+                "/api/demo/approve", headers=headers, json=body
+            )
+            second = self.client.post(
+                "/api/demo/approve", headers=headers, json=body
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()["status"], "approved_not_submitted")
+        self.assertFalse(first.get_json()["automatic_order_submitted"])
+        self.assertEqual(second.status_code, 409)
+
+        with api_module._demo_proposals_lock:
+            api_module._demo_proposals.pop(proposal_id, None)
+
+
+    def test_demo_approval_rejects_expired_proposal(self):
+        import time
+        from backend import api as api_module
+
+        proposal_id = "test-proposal-expired"
+        proposal = {
+            "proposal_id": proposal_id,
+            "created_at": (
+                time.monotonic()
+                - api_module._DEMO_PROPOSAL_TTL_SECONDS
+                - 1
+            ),
+            "approved": False,
+        }
+
+        with api_module._demo_proposals_lock:
+            api_module._demo_proposals[proposal_id] = proposal
+
+        try:
+            with patch.dict("os.environ", {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            }):
+                response = self.client.post(
+                    "/api/demo/approve",
+                    headers={
+                        "Authorization": "Bearer test-only-secret"
+                    },
+                    json={
+                        "proposal_id": proposal_id,
+                        "approve": True,
+                    },
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertFalse(
+                response.get_json()["automatic_order_submitted"]
+            )
+
+            with api_module._demo_proposals_lock:
+                self.assertNotIn(
+                    proposal_id,
+                    api_module._demo_proposals,
+                )
+        finally:
+            with api_module._demo_proposals_lock:
+                api_module._demo_proposals.pop(proposal_id, None)
+
+    @patch("backend.api.execute_demo_signal", new_callable=AsyncMock)
+    @patch("backend.api._build_signal_payload")
+    def test_demo_execute_claims_proposal_after_failed_attempt(
+        self, mock_build_payload, mock_execute
+    ):
+        import time
+        from backend import api as api_module
+
+        proposal_id = "test-proposal-single-execution"
+        proposal = {
+            "proposal_id": proposal_id,
+            "created_at": time.monotonic(),
+            "approved": True,
+            "execution_claimed": False,
+            "symbol": "XAUUSD",
+            "timeframe": "5m",
+            "signal": "BUY",
+            "candle_time": "2026-10-15T10:00:00+00:00",
+            "candle_id": "XAUUSD|5m|2026-10-15T10:00:00+00:00",
+            "entry_price": 4100.0,
+            "stop_loss": 4090.0,
+            "take_profit": 4120.0,
+            "volume": 0.01,
+            "estimated_loss": 1.0,
+            "maximum_allowed_loss": 500.0,
+            "risk_percent": 0.5,
+        }
+
+        with api_module._demo_proposals_lock:
+            api_module._demo_proposals[proposal_id] = proposal
+
+        headers = {
+            "Authorization": "Bearer test-only-secret"
+        }
+        body = {"proposal_id": proposal_id}
+
+        try:
+            with patch.dict("os.environ", {
+                "DEMO_EXECUTION_API_ENABLED": "true",
+                "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+            }):
+                # Simulate a failure after the proposal is claimed.
+                mock_build_payload.side_effect = RuntimeError(
+                    "Simulated signal retrieval failure"
+                )
+
+                first = self.client.post(
+                    "/api/demo/execute",
+                    headers=headers,
+                    json=body,
+                )
+
+                second = self.client.post(
+                    "/api/demo/execute",
+                    headers=headers,
+                    json=body,
+                )
+
+            self.assertEqual(first.status_code, 503)
+            self.assertEqual(second.status_code, 409)
+            self.assertFalse(
+                first.get_json()["automatic_order_submitted"]
+            )
+            self.assertFalse(
+                second.get_json()["automatic_order_submitted"]
+            )
+            mock_execute.assert_not_awaited()
+
+            with api_module._demo_proposals_lock:
+                self.assertTrue(
+                    api_module._demo_proposals[proposal_id][
+                        "execution_claimed"
+                    ]
+                )
+        finally:
+            with api_module._demo_proposals_lock:
+                api_module._demo_proposals.pop(proposal_id, None)
 
 if __name__ == "__main__":
     unittest.main()
