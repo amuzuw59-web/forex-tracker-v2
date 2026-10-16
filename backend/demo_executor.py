@@ -49,7 +49,7 @@ def validate_signal_freshness(candle_time, timeframe, config=None):
     now = datetime.now(timezone.utc)
     age_minutes = (now - parsed).total_seconds() / 60.0
 
-    if age_minutes < -1:
+    if age_minutes < 0:
         raise ValueError("Signal candle timestamp is in the future.")
 
     data_config = config.get("data", {})

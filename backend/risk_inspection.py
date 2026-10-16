@@ -44,6 +44,10 @@ async def inspect_risk_data():
 
     try:
         account = await api.metatrader_account_api.get_account(account_id)
+
+        # Wait for MetaApi to confirm broker connectivity before RPC requests.
+        await account.wait_connected()
+
         connection = account.get_rpc_connection()
 
         await connection.connect()
