@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 import signal
 from datetime import datetime, timezone
@@ -140,7 +141,14 @@ def append_history(history_path, record, max_entries):
         temporary_path.replace(history_path)
 
 
+
+def _database_history_enabled():
+    """Return whether PostgreSQL history storage is configured."""
+    return bool(os.environ.get("DATABASE_URL", "").strip())
+
+
 async def monitor():
+
     global STOP_EVENT, STOP_LOOP
     STOP_EVENT = asyncio.Event()
     STOP_LOOP = asyncio.get_running_loop()
@@ -158,12 +166,29 @@ async def monitor():
         monitor_config.get("max_history_entries", 5000)
     )
     history_path = get_history_path(config)
+    use_database = _database_history_enabled()
 
-    last_processed_candle = load_last_processed_candle(
-        history_path,
-        configured_symbol,
-        timeframe,
-    )
+    if use_database:
+        from backend.history_store import (
+            initialize_history_store,
+            load_last_processed_candle as load_database_last_candle,
+        )
+
+        # If PostgreSQL is configured but unavailable, do not silently
+        # fall back to temporary local-only persistence.
+        await asyncio.to_thread(initialize_history_store)
+        last_processed_candle = await asyncio.to_thread(
+            load_database_last_candle,
+            configured_symbol,
+            timeframe,
+        )
+        logger.info("PostgreSQL signal history is enabled.")
+    else:
+        last_processed_candle = load_last_processed_candle(
+            history_path,
+            configured_symbol,
+            timeframe,
+        )
 
     if last_processed_candle:
         logger.info(
@@ -223,11 +248,43 @@ async def monitor():
                         "order_submitted": False,
                     }
 
-                    append_history(
-                        history_path,
-                        record,
-                        max_history_entries,
-                    )
+                    if use_database:
+                        from backend.history_store import append_database_record
+
+                        inserted = await asyncio.to_thread(
+                            append_database_record,
+                            record,
+                            max_history_entries,
+                        )
+
+                        if not inserted:
+                            logger.info(
+                                "Duplicate candle already stored in PostgreSQL: %s",
+                                candle_id,
+                            )
+                            last_processed_candle = candle_id
+                            continue
+
+                        # PostgreSQL is authoritative. A local mirror error
+                        # must not cause a saved database record to be retried.
+                        try:
+                            await asyncio.to_thread(
+                                append_history,
+                                history_path,
+                                record,
+                                max_history_entries,
+                            )
+                        except OSError:
+                            logger.exception(
+                                "Signal is saved in PostgreSQL, but the "
+                                "local JSONL mirror could not be updated."
+                            )
+                    else:
+                        append_history(
+                            history_path,
+                            record,
+                            max_history_entries,
+                        )
 
                     last_processed_candle = candle_id
 
