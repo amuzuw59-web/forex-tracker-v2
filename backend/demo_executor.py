@@ -133,11 +133,14 @@ def calculate_volume_from_tick_value(
     min_volume,
     max_volume,
     volume_step,
+    contract_size=None,
+    cost_reserve_percent=20.0,
 ):
     """Estimate stop-loss risk using the broker quote's loss tick value."""
     from backend.risk_calculator import (
         calculate_risk_limit,
         estimate_price_movement_loss,
+        estimate_contract_price_movement_loss,
     )
 
     values = {
@@ -175,9 +178,49 @@ def calculate_volume_from_tick_value(
         volume=1.0,
     )
 
-    raw_volume = risk_limit / loss_per_lot
+    if (
+        isinstance(cost_reserve_percent, bool)
+        or not isinstance(cost_reserve_percent, (int, float))
+        or not math.isfinite(cost_reserve_percent)
+        or not 0 <= cost_reserve_percent < 100
+    ):
+        raise ValueError("Cost reserve must be between 0 and 100 percent.")
+
+    if contract_size is not None:
+        if (
+            isinstance(contract_size, bool)
+            or not isinstance(contract_size, (int, float))
+            or not math.isfinite(contract_size)
+            or contract_size <= 0
+        ):
+            raise ValueError("Contract size must be finite and positive.")
+
+        contract_loss = estimate_contract_price_movement_loss(
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            contract_size=contract_size,
+            volume=1.0,
+        )
+        if not math.isclose(
+            loss_per_lot, contract_loss, rel_tol=0.01, abs_tol=0.01
+        ):
+            raise ValueError(
+                "Broker tick-value and contract-size loss estimates disagree."
+            )
+
+    usable_risk_limit = risk_limit * (
+        1.0 - cost_reserve_percent / 100.0
+    )
+    raw_volume = usable_risk_limit / loss_per_lot
+
+    # Fail immediately if even the broker's minimum lot exceeds the budget.
+    if raw_volume < min_volume:
+        raise ValueError(
+            "Minimum broker volume exceeds the configured risk limit."
+        )
+
     steps = math.floor((raw_volume - min_volume) / volume_step + 1e-9)
-    volume = round(min_volume + max(steps, 0) * volume_step, 8)
+    volume = round(min_volume + steps * volume_step, 8)
 
     if volume < min_volume or volume > max_volume:
         raise ValueError("Calculated volume is outside broker limits.")
@@ -190,17 +233,29 @@ def calculate_volume_from_tick_value(
         volume=volume,
     )
 
-    if estimated_loss > risk_limit + 1e-8:
+    if estimated_loss > usable_risk_limit + 1e-8:
         raise ValueError(
             "Minimum broker volume exceeds the configured risk limit."
         )
 
+    cost_reserve = risk_limit * cost_reserve_percent / 100.0
+    estimated_total_risk = estimated_loss + cost_reserve
+    if estimated_total_risk > risk_limit + 1e-8:
+        raise ValueError("Estimated loss plus reserve exceeds risk limit.")
+
     return {
         "volume": volume,
         "estimated_loss": round(estimated_loss, 2),
+        "estimated_cost_reserve": round(cost_reserve, 2),
+        "estimated_total_risk": round(estimated_total_risk, 2),
+        "cost_reserve_percent": float(cost_reserve_percent),
         "maximum_allowed_loss": round(risk_limit, 2),
         "risk_percent": risk_percent,
-        "risk_basis": "broker_quote_loss_tick_value",
+        "risk_basis": (
+            "tick_value_cross_checked_against_contract_size"
+            if contract_size is not None
+            else "broker_quote_loss_tick_value"
+        ),
     }
 
 async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmation=False, prepare_only=False, expected_proposal=None):
@@ -335,6 +390,7 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
             min_volume=float(spec["minVolume"]),
             max_volume=float(spec["maxVolume"]),
             volume_step=float(spec["volumeStep"]),
+            contract_size=float(spec["contractSize"]),
         )
 
         # Match the approved proposal against fresh broker-derived values.

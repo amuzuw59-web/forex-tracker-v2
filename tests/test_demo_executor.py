@@ -285,6 +285,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
         })
         connection.get_symbol_specification = AsyncMock(return_value={
             "tickSize": 0.01,
+                    "contractSize": 100.0,
             "minVolume": 0.01,
             "maxVolume": 100.0,
             "volumeStep": 0.01,
@@ -364,6 +365,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
         })
         connection.get_symbol_specification = AsyncMock(return_value={
             "tickSize": 0.01,
+                    "contractSize": 100.0,
             "minVolume": 0.01,
             "maxVolume": 100.0,
             "volumeStep": 0.01,
@@ -449,6 +451,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
             })
             connection.get_symbol_specification = AsyncMock(return_value={
                 "tickSize": 0.01,
+                    "contractSize": 100.0,
                 "minVolume": 0.01,
                 "maxVolume": 100.0,
                 "volumeStep": 0.01,
