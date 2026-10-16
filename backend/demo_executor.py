@@ -466,6 +466,14 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
                 "automatic_order_submitted": False,
             }
 
+        # Enforce proposal matching at the final order-submission boundary.
+        if expected_proposal is None:
+            return {
+                "status": "blocked",
+                "reason": "An approved proposal is required for execution.",
+                "automatic_order_submitted": False,
+            }
+
         submission = await submit_signal_once(
             connection,
             symbol=symbol,
