@@ -109,6 +109,45 @@ def _build_signal_payload():
     }
 
 
+from backend.openai_assistant import ask_assistant
+
+
+@app.post("/api/assistant")
+def assistant():
+    expected = os.environ.get("ASSISTANT_ACCESS_TOKEN", "").strip()
+    supplied = request.headers.get("X-Assistant-Token", "")
+
+    if not expected:
+        return jsonify({
+            "status": "error",
+            "error": "Assistant access is not configured."
+        }), 503
+
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        return jsonify({"error": "Unauthorized."}), 401
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Send a JSON object."}), 400
+
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({"error": "A message is required."}), 400
+    if len(message) > 2000:
+        return jsonify({"error": "Message exceeds 2000 characters."}), 413
+
+    try:
+        answer = ask_assistant(message.strip())
+        return jsonify({"status": "ok", "answer": answer}), 200
+    except RuntimeError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 503
+    except Exception:
+        app.logger.exception("AI assistant request failed")
+        return jsonify({
+            "status": "error",
+            "error": "Assistant temporarily unavailable."
+        }), 503
+
 @app.get("/api/signal")
 def signal():
     try:
