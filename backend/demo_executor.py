@@ -71,6 +71,59 @@ def validate_signal_freshness(candle_time, timeframe, config=None):
     }
 
 
+
+def validate_broker_quote_freshness(quote, config=None):
+    """Reject missing, invalid, future-dated, or stale broker quotes."""
+    if not isinstance(quote, dict):
+        raise ValueError("Broker quote is missing or invalid.")
+
+    raw_time = quote.get("time")
+    if isinstance(raw_time, datetime):
+        parsed = raw_time
+    elif isinstance(raw_time, str) and raw_time.strip():
+        try:
+            parsed = datetime.fromisoformat(
+                raw_time.strip().replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("Broker quote timestamp is invalid.") from exc
+    else:
+        raise ValueError("Broker quote timestamp is required.")
+
+    if parsed.tzinfo is None:
+        raise ValueError("Broker quote timestamp must include a timezone.")
+
+    parsed = parsed.astimezone(timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - parsed).total_seconds()
+
+    if age_seconds < 0:
+        raise ValueError("Broker quote timestamp is in the future.")
+
+    if config is None:
+        config = load_config()
+
+    data_config = config.get("data", {})
+    max_age = data_config.get("max_quote_age_seconds", 60)
+
+    if (
+        isinstance(max_age, bool)
+        or not isinstance(max_age, (int, float))
+        or not math.isfinite(max_age)
+        or max_age <= 0
+    ):
+        raise ValueError("Broker quote freshness limit is invalid.")
+
+    if age_seconds > float(max_age):
+        raise ValueError(
+            f"Broker quote is stale: {age_seconds:.1f} seconds old."
+        )
+
+    return {
+        "quote_time": parsed.isoformat(),
+        "age_seconds": round(age_seconds, 2),
+        "max_age_seconds": float(max_age),
+    }
+
 def calculate_volume(
     equity,
     entry_price,
@@ -346,6 +399,7 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
         symbol = config["market"]["symbol"]
         spec = await connection.get_symbol_specification(symbol)
         quote = await connection.get_symbol_price(symbol)
+        quote_freshness = validate_broker_quote_freshness(quote, config)
         positions = await connection.get_positions()
         orders = await connection.get_orders()
 
@@ -498,6 +552,7 @@ async def execute_demo_signal(signal, candle_id, candle_time, manual_confirmatio
                 **risk,
                 "candle_id": str(candle_id),
                 "freshness": freshness,
+                "quote_freshness": quote_freshness,
                 "automatic_order_submitted": False,
                 "message": (
                     "Broker validation completed. No order was submitted."

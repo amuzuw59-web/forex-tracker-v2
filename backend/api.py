@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 
 from backend.analysis import analyze_candles
+from backend.candlestick_tracker import track_next_move
 from backend.data_provider import get_candles
 from backend.demo_executor import validate_signal_freshness, execute_demo_signal
 from backend.signal_identity import make_signal_identity
@@ -78,11 +79,28 @@ def _build_signal_payload():
     freshness = validate_signal_freshness(latest_candle_time, timeframe)
     result = analyze_candles(candles)
 
+    # Informational only: tracker failures must not break existing signals.
+    try:
+        candlestick_tracker = track_next_move(
+            candles, symbol=symbol, timeframe=timeframe
+        )
+    except Exception:
+        app.logger.exception("Candlestick tracker analysis failed")
+        candlestick_tracker = {
+            "status": "unavailable",
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "outlook": "NEUTRAL",
+            "message": "Candlestick outlook is temporarily unavailable.",
+            "order_execution_enabled": False,
+        }
+
     return {
         "status": "ok",
         "symbol": symbol,
         "timeframe": timeframe,
         "signal": result,
+        "candlestick_tracker": candlestick_tracker,
         "latest_candle": latest_candle_time,
         "candle_freshness": freshness,
         "candles_available": len(candles),

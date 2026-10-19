@@ -25,7 +25,8 @@
       "1h": 90,
       "4h": 480,
       "1d": 4320
-    }
+    },
+    "max_quote_age_seconds": 60
   },
   "trading": {
     "enabled": false,

@@ -7,6 +7,7 @@ from backend.demo_executor import (
     calculate_volume_from_tick_value,
     execute_demo_signal,
     validate_signal_freshness,
+    validate_broker_quote_freshness,
 )
 
 
@@ -291,6 +292,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
             "volumeStep": 0.01,
         })
         connection.get_symbol_price = AsyncMock(return_value={
+            "time": datetime.now(timezone.utc).isoformat(),
             "bid": 4200.0,
             "ask": 4200.1,
             "lossTickValue": 1.0,
@@ -338,6 +340,174 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
 
 
 
+    async def test_prepare_only_never_submits_order(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        config = {
+            "trading": {
+                "enabled": False,
+                "require_demo_account": True,
+                "require_manual_confirmation": True,
+                "max_open_positions": 1,
+                "max_risk_percent": 0.5,
+                "submission_enabled": False,
+                "monetary_risk_independently_verified": False,
+            },
+            "market": {"symbol": "XAUUSD", "timeframe": "5m"},
+            "data": {"max_candle_age_minutes": {"5m": 20}},
+        }
+
+        connection = MagicMock()
+        connection.connect = AsyncMock()
+        connection.wait_synchronized = AsyncMock()
+        connection.get_account_information = AsyncMock(return_value={
+            "type": "ACCOUNT_TRADE_MODE_DEMO",
+            "tradeAllowed": True,
+            "investorMode": False,
+            "equity": 10000.0,
+        })
+        connection.get_symbol_specification = AsyncMock(return_value={
+            "tickSize": 0.01,
+            "contractSize": 100.0,
+            "minVolume": 0.01,
+            "maxVolume": 100.0,
+            "volumeStep": 0.01,
+        })
+        connection.get_symbol_price = AsyncMock(return_value={
+            "time": datetime.now(timezone.utc).isoformat(),
+            "bid": 4200.0,
+            "ask": 4200.1,
+            "lossTickValue": 1.0,
+        })
+        connection.get_positions = AsyncMock(return_value=[])
+        connection.get_orders = AsyncMock(return_value=[])
+        connection.close = AsyncMock()
+
+        account = MagicMock()
+        account.get_rpc_connection.return_value = connection
+
+        account_api = MagicMock()
+        account_api.get_account = AsyncMock(return_value=account)
+
+        api = MagicMock()
+        api.metatrader_account_api = account_api
+
+        with (
+            patch("backend.demo_executor.load_config", return_value=config),
+            patch("backend.demo_executor.MetaApi", return_value=api),
+            patch.dict("os.environ", {
+                "METAAPI_TOKEN": "test-token",
+                "METAAPI_ACCOUNT_ID": "test-account",
+            }),
+            patch(
+                "backend.demo_executor.submit_signal_once",
+                new_callable=AsyncMock,
+            ) as submit,
+        ):
+            result = await execute_demo_signal(
+                {
+                    "signal": "BUY",
+                    "stop_loss": 4190.0,
+                    "take_profit": 4220.0,
+                },
+                "test-prepare-only",
+                datetime.now(timezone.utc).isoformat(),
+                prepare_only=True,
+            )
+
+        self.assertEqual(result["status"], "proposal_ready")
+        self.assertFalse(result["automatic_order_submitted"])
+        submit.assert_not_awaited()
+        connection.close.assert_awaited_once()
+        api.close.assert_called_once()
+
+    async def test_stale_broker_quote_blocks_before_positions_check(self):
+        from datetime import timedelta
+        from unittest.mock import AsyncMock, MagicMock
+
+        config = {
+            "trading": {
+                "enabled": True,
+                "require_demo_account": True,
+                "require_manual_confirmation": True,
+                "max_open_positions": 1,
+                "max_risk_percent": 0.5,
+                "submission_enabled": False,
+            },
+            "market": {"symbol": "XAUUSD", "timeframe": "5m"},
+            "data": {
+                "max_candle_age_minutes": {"5m": 20},
+                "max_quote_age_seconds": 60,
+            },
+        }
+
+        stale_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=120)
+        ).isoformat()
+
+        connection = MagicMock()
+        connection.connect = AsyncMock()
+        connection.wait_synchronized = AsyncMock()
+        connection.get_account_information = AsyncMock(return_value={
+            "type": "ACCOUNT_TRADE_MODE_DEMO",
+            "tradeAllowed": True,
+            "investorMode": False,
+            "equity": 10000.0,
+        })
+        connection.get_symbol_specification = AsyncMock(return_value={
+            "tickSize": 0.01,
+            "contractSize": 100.0,
+            "minVolume": 0.01,
+            "maxVolume": 100.0,
+            "volumeStep": 0.01,
+        })
+        connection.get_symbol_price = AsyncMock(return_value={
+            "time": stale_time,
+            "bid": 4200.0,
+            "ask": 4200.1,
+            "lossTickValue": 1.0,
+        })
+        connection.get_positions = AsyncMock(return_value=[])
+        connection.get_orders = AsyncMock(return_value=[])
+        connection.close = AsyncMock()
+
+        account = MagicMock()
+        account.get_rpc_connection.return_value = connection
+        account_api = MagicMock()
+        account_api.get_account = AsyncMock(return_value=account)
+        api = MagicMock()
+        api.metatrader_account_api = account_api
+
+        with (
+            patch("backend.demo_executor.load_config", return_value=config),
+            patch("backend.demo_executor.MetaApi", return_value=api),
+            patch.dict("os.environ", {
+                "METAAPI_TOKEN": "test-token",
+                "METAAPI_ACCOUNT_ID": "test-account",
+            }),
+            patch(
+                "backend.demo_executor.submit_signal_once",
+                new_callable=AsyncMock,
+            ) as submit,
+        ):
+            result = await execute_demo_signal(
+                {
+                    "signal": "BUY",
+                    "stop_loss": 4190.0,
+                    "take_profit": 4220.0,
+                },
+                "test-stale-broker-quote",
+                datetime.now(timezone.utc).isoformat(),
+                manual_confirmation=True,
+            )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("stale", result["reason"].lower())
+        connection.get_positions.assert_not_awaited()
+        connection.get_orders.assert_not_awaited()
+        submit.assert_not_awaited()
+        connection.close.assert_awaited_once()
+
     async def test_existing_open_order_blocks_execution(self):
         from unittest.mock import AsyncMock, MagicMock
 
@@ -371,6 +541,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
             "volumeStep": 0.01,
         })
         connection.get_symbol_price = AsyncMock(return_value={
+            "time": datetime.now(timezone.utc).isoformat(),
             "bid": 4200.0,
             "ask": 4200.1,
             "lossTickValue": 1.0,
@@ -457,6 +628,7 @@ class TestDemoExecutorSafety(unittest.IsolatedAsyncioTestCase):
                 "volumeStep": 0.01,
             })
             connection.get_symbol_price = AsyncMock(return_value={
+                "time": datetime.now(timezone.utc).isoformat(),
                 "bid": 4200.0,
                 "ask": 4200.1,
                 "lossTickValue": 1.0,
@@ -602,3 +774,35 @@ class TestTickValueVolumeSafety(unittest.TestCase):
         values = {**self.valid, "loss_tick_value": 0}
         with self.assertRaisesRegex(ValueError, "loss_tick_value"):
             calculate_volume_from_tick_value(**values)
+
+
+class TestBrokerQuoteFreshness(unittest.TestCase):
+    def setUp(self):
+        self.config = {"data": {"max_quote_age_seconds": 60}}
+        self.now = datetime.now(timezone.utc)
+
+    def test_accepts_fresh_quote(self):
+        result = validate_broker_quote_freshness(
+            {"time": self.now.isoformat()}, self.config
+        )
+        self.assertLessEqual(result["age_seconds"], 1)
+
+    def test_rejects_stale_quote(self):
+        old = (self.now - __import__("datetime").timedelta(seconds=90)).isoformat()
+        with self.assertRaisesRegex(ValueError, "stale"):
+            validate_broker_quote_freshness({"time": old}, self.config)
+
+    def test_rejects_missing_timestamp(self):
+        with self.assertRaisesRegex(ValueError, "required"):
+            validate_broker_quote_freshness({"bid": 4200}, self.config)
+
+    def test_rejects_future_timestamp(self):
+        future = (self.now + __import__("datetime").timedelta(seconds=10)).isoformat()
+        with self.assertRaisesRegex(ValueError, "future"):
+            validate_broker_quote_freshness({"time": future}, self.config)
+
+    def test_rejects_timezone_naive_timestamp(self):
+        with self.assertRaisesRegex(ValueError, "timezone"):
+            validate_broker_quote_freshness(
+                {"time": "2026-10-16T12:00:00"}, self.config
+            )

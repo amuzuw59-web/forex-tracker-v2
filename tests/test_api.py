@@ -53,6 +53,10 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["symbol"], "XAUUSD")
         self.assertEqual(data["timeframe"], "5m")
         self.assertFalse(data["automatic_trading"])
+        self.assertIn("candlestick_tracker", data)
+        tracker = data["candlestick_tracker"]
+        self.assertEqual(tracker["status"], "unavailable")
+        self.assertFalse(tracker["order_execution_enabled"])
 
     @patch("backend.api.get_candles")
     def test_stale_market_data_returns_503(self, mock_get_candles):
