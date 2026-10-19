@@ -45,15 +45,19 @@ async def fetch_candles():
 
     try:
         stage_started = time.monotonic()
-        account = await api.metatrader_account_api.get_account(account_id)
+        account = await asyncio.wait_for(
+            api.metatrader_account_api.get_account(account_id), timeout=8
+        )
         print(f"[TIMING] get_account: {time.monotonic() - stage_started:.2f}s", flush=True)
         connection = account.get_rpc_connection()
 
         stage_started = time.monotonic()
-        await connection.connect()
+        await asyncio.wait_for(connection.connect(), timeout=8)
         print(f"[TIMING] connect: {time.monotonic() - stage_started:.2f}s", flush=True)
         stage_started = time.monotonic()
-        await connection.wait_synchronized(timeout_in_seconds=15)
+        await asyncio.wait_for(
+            connection.wait_synchronized(timeout_in_seconds=12), timeout=12
+        )
         print(f"[TIMING] synchronization: {time.monotonic() - stage_started:.2f}s", flush=True)
 
         timeframe_minutes = {
@@ -66,8 +70,11 @@ async def fetch_candles():
             "1d": 1440,
         }
         stage_started = time.monotonic()
-        candles = await account.get_historical_candles(
-            symbol, timeframe, None, candle_count
+        candles = await asyncio.wait_for(
+            account.get_historical_candles(
+                symbol, timeframe, None, candle_count
+            ),
+            timeout=18,
         )
 
         print(f"[DEBUG] Requested symbol: {symbol}", flush=True)
