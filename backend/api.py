@@ -123,7 +123,7 @@ def assistant():
             "error": "Assistant access is not configured."
         }), 503
 
-    if not supplied or not hmac.compare_digest(supplied, expected):
+    if not supplied or not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         return jsonify({"error": "Unauthorized."}), 401
 
     body = request.get_json(silent=True)
