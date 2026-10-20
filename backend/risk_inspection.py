@@ -5,6 +5,7 @@ Theoretical calculations do not authorize trading.
 """
 
 import asyncio
+from datetime import datetime, timezone
 import math
 import os
 from pathlib import Path
@@ -55,6 +56,46 @@ async def inspect_risk_data():
 
         info = await connection.get_account_information()
         quote = await connection.get_symbol_price("XAUUSD")
+
+        # Use MetaApi server time as the reference for quote freshness.
+        server_time_data = await connection.get_server_time()
+        quote_time = quote.get("time") if isinstance(quote, dict) else None
+        server_time = (
+            server_time_data.get("time")
+            if isinstance(server_time_data, dict)
+            else None
+        )
+
+        if not isinstance(quote_time, datetime):
+            raise RuntimeError(
+                "Risk inspection denied: quote timestamp is missing or invalid."
+            )
+
+        if not isinstance(server_time, datetime):
+            raise RuntimeError(
+                "Risk inspection denied: MetaApi server time is missing or invalid."
+            )
+
+        for label, timestamp in (
+            ("Quote", quote_time),
+            ("MetaApi server", server_time),
+        ):
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise RuntimeError(
+                    f"Risk inspection denied: {label} timestamp has no timezone."
+                )
+
+        quote_age = (
+            server_time.astimezone(timezone.utc)
+            - quote_time.astimezone(timezone.utc)
+        ).total_seconds()
+
+        if quote_age < 0 or quote_age > 60:
+            raise RuntimeError(
+                f"Risk inspection denied: quote age relative to MetaApi "
+                f"server time is {quote_age:.1f}s; maximum permitted age is 60s."
+            )
+
         spec = await connection.get_symbol_specification("XAUUSD")
 
         equity = info.get("equity")
