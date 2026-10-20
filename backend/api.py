@@ -427,7 +427,8 @@ def execute_demo():
             expected_proposal=proposal,
         ))
 
-        verified = result.get("status") in (
+        submission_status = result.get("status")
+        verified = submission_status in (
             "verified_position",
             "verified_order",
         )
@@ -436,6 +437,10 @@ def execute_demo():
             **result,
             "proposal_id": proposal_id,
             "automatic_order_submitted": verified,
+            "broker_state_verified": verified,
+            "open_position_verified": (
+                submission_status == "verified_position"
+            ),
         }), (200 if verified else 409)
 
     except Exception:

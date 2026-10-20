@@ -445,5 +445,94 @@ class TestAPI(unittest.TestCase):
             with api_module._demo_proposals_lock:
                 api_module._demo_proposals.pop(proposal_id, None)
 
+
+    @patch("backend.api.execute_demo_signal", new_callable=AsyncMock)
+    @patch("backend.api._build_signal_payload")
+    def test_demo_execute_reports_verified_broker_state(
+        self, mock_build_payload, mock_execute
+    ):
+        import time
+        from backend import api as api_module
+
+        candle_time = "2026-10-15T10:00:00+00:00"
+        candle_id = api_module.make_signal_identity(
+            "XAUUSD", "5m", candle_time
+        )
+        mock_build_payload.return_value = {
+            "status": "ok",
+            "symbol": "XAUUSD",
+            "timeframe": "5m",
+            "latest_candle": candle_time,
+            "signal": {
+                "signal": "BUY",
+                "stop_loss": 4090.0,
+                "take_profit": 4120.0,
+            },
+        }
+
+        headers = {
+            "Authorization": "Bearer test-only-secret"
+        }
+
+        cases = (
+            ("verified_position", True, True),
+            ("verified_order", True, False),
+        )
+
+        with patch.dict("os.environ", {
+            "DEMO_EXECUTION_API_ENABLED": "true",
+            "DEMO_EXECUTION_API_TOKEN": "test-only-secret",
+        }):
+            for status, broker_verified, position_verified in cases:
+                proposal_id = "test-response-" + status
+                proposal = {
+                    "proposal_id": proposal_id,
+                    "created_at": time.monotonic(),
+                    "approved": True,
+                    "execution_claimed": False,
+                    "symbol": "XAUUSD",
+                    "timeframe": "5m",
+                    "signal": "BUY",
+                    "candle_time": candle_time,
+                    "candle_id": candle_id,
+                    "entry_price": 4100.0,
+                    "stop_loss": 4090.0,
+                    "take_profit": 4120.0,
+                    "volume": 0.01,
+                    "estimated_loss": 1.0,
+                    "maximum_allowed_loss": 500.0,
+                    "risk_percent": 0.5,
+                }
+
+                with api_module._demo_proposals_lock:
+                    api_module._demo_proposals[proposal_id] = proposal
+
+                try:
+                    mock_execute.reset_mock()
+                    mock_execute.return_value = {"status": status}
+
+                    response = self.client.post(
+                        "/api/demo/execute",
+                        headers=headers,
+                        json={"proposal_id": proposal_id},
+                    )
+
+                    self.assertEqual(response.status_code, 200)
+                    data = response.get_json()
+                    self.assertEqual(data["status"], status)
+                    self.assertEqual(
+                        data["automatic_order_submitted"], broker_verified
+                    )
+                    self.assertEqual(
+                        data["broker_state_verified"], broker_verified
+                    )
+                    self.assertEqual(
+                        data["open_position_verified"], position_verified
+                    )
+                    mock_execute.assert_awaited_once()
+                finally:
+                    with api_module._demo_proposals_lock:
+                        api_module._demo_proposals.pop(proposal_id, None)
+
 if __name__ == "__main__":
     unittest.main()
