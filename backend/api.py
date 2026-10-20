@@ -71,13 +71,24 @@ def _expire_demo_proposals(now):
 
 
 def _build_signal_payload():
+    build_started = time.monotonic()
+    fetch_started = time.monotonic()
     symbol, timeframe, candles = get_candles()
+    app.logger.info(
+        "[TIMING] signal get_candles: %.2fs",
+        time.monotonic() - fetch_started,
+    )
     if candles is None or candles.empty:
         raise ValueError("No market candles are available.")
 
     latest_candle_time = candles.iloc[-1]["datetime"].isoformat()
     freshness = validate_signal_freshness(latest_candle_time, timeframe)
+    analysis_started = time.monotonic()
     result = analyze_candles(candles)
+    app.logger.info(
+        "[TIMING] signal analyze_candles: %.2fs",
+        time.monotonic() - analysis_started,
+    )
 
     # Informational only: tracker failures must not break existing signals.
     try:
@@ -95,6 +106,10 @@ def _build_signal_payload():
             "order_execution_enabled": False,
         }
 
+    app.logger.info(
+        "[TIMING] signal build total: %.2fs",
+        time.monotonic() - build_started,
+    )
     return {
         "status": "ok",
         "symbol": symbol,
