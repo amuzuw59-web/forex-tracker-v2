@@ -40,6 +40,7 @@ class TestBacktesterReliability(unittest.TestCase):
             result = run_backtest(candles)
 
         self.assertEqual(result["trades_count"], 0)
+        self.assertEqual(result["incomplete_trades_count"], 0)
         self.assertEqual(result["winning_trades"], 0)
         self.assertEqual(result["losing_trades"], 0)
         self.assertEqual(result["net_profit_r"], 0.0)
@@ -64,6 +65,7 @@ class TestBacktesterReliability(unittest.TestCase):
             result = run_backtest(candles)
 
         self.assertEqual(result["trades_count"], 0)
+        self.assertEqual(result["incomplete_trades_count"], 1)
         self.assertEqual(result["trades"], [])
         self.assertEqual(result["net_profit_r"], 0.0)
         self.assertFalse(result["trading_enabled"])

@@ -111,6 +111,7 @@ def run_backtest(candles):
         raise ValueError("ATR stop and target multipliers must be positive.")
 
     trades = []
+    incomplete_trades_count = 0
     equity_r = 0.0
     equity_curve = [0.0]
     peak_equity = 0.0
@@ -185,6 +186,7 @@ def run_backtest(candles):
 
         # Do not invent an exit if the historical data ends first.
         if exit_price is None:
+            incomplete_trades_count += 1
             break
 
         if signal == "BUY":
@@ -245,6 +247,7 @@ def run_backtest(candles):
         "symbol": config["market"]["symbol"],
         "timeframe": config["market"]["timeframe"],
         "trades_count": count,
+        "incomplete_trades_count": incomplete_trades_count,
         "winning_trades": len(winners),
         "losing_trades": len(losers),
         "win_rate_percent": (
