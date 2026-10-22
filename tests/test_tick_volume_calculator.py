@@ -156,5 +156,31 @@ class TestTickVolumeCalculator(unittest.TestCase):
             places=7,
         )
 
+
+    def test_contract_size_cross_check_accepts_matching_estimates(self):
+        result = self.calculate(contract_size=100.0)
+        self.assertEqual(
+            result["risk_basis"],
+            "tick_value_cross_checked_against_contract_size",
+        )
+
+    def test_contract_size_cross_check_rejects_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "estimates disagree"):
+            self.calculate(contract_size=90.0)
+
+    def test_default_cost_reserve_keeps_total_within_risk_limit(self):
+        result = self.calculate()
+        self.assertEqual(result["cost_reserve_percent"], 20.0)
+        self.assertAlmostEqual(result["estimated_cost_reserve"], 10.0)
+        self.assertLessEqual(
+            result["estimated_total_risk"],
+            result["maximum_allowed_loss"],
+        )
+        self.assertAlmostEqual(result["estimated_total_risk"], 50.0)
+
+    def test_invalid_cost_reserve_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Cost reserve"):
+            self.calculate(cost_reserve_percent=100.0)
+
 if __name__ == "__main__":
     unittest.main()

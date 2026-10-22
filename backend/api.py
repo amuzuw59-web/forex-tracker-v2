@@ -13,6 +13,7 @@ from backend.candlestick_tracker import track_next_move
 from backend.data_provider import get_candles
 from backend.demo_executor import validate_signal_freshness, execute_demo_signal
 from backend.signal_identity import make_signal_identity
+from backend.backtester import run_backtest
 
 app = Flask(__name__)
 
@@ -161,6 +162,54 @@ def assistant():
         return jsonify({
             "status": "error",
             "error": "Assistant temporarily unavailable."
+        }), 503
+
+
+@app.post("/api/simulation/backtest")
+def simulation_backtest():
+    """Run a historical backtest without placing or approving orders."""
+    if os.getenv("SIMULATION_API_ENABLED", "false").lower() != "true":
+        return jsonify({
+            "status": "disabled",
+            "message": "Historical simulation API is disabled.",
+            "trading_enabled": False,
+            "automatic_order_submitted": False,
+        }), 404
+
+    try:
+        symbol, timeframe, candles = get_candles()
+
+        if candles is None or candles.empty:
+            return jsonify({
+                "status": "error",
+                "message": "No historical candles are available.",
+                "trading_enabled": False,
+                "automatic_order_submitted": False,
+            }), 503
+
+        result = run_backtest(candles)
+        result["symbol"] = symbol
+        result["timeframe"] = timeframe
+        result["simulation_only"] = True
+        result["trading_enabled"] = False
+        result["automatic_order_submitted"] = False
+
+        return jsonify(result), 200
+
+    except ValueError as exc:
+        return jsonify({
+            "status": "error",
+            "message": str(exc),
+            "trading_enabled": False,
+            "automatic_order_submitted": False,
+        }), 400
+    except Exception:
+        app.logger.exception("Historical simulation failed")
+        return jsonify({
+            "status": "error",
+            "message": "Historical simulation is temporarily unavailable.",
+            "trading_enabled": False,
+            "automatic_order_submitted": False,
         }), 503
 
 @app.get("/api/signal")

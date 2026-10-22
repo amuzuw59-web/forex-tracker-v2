@@ -534,5 +534,99 @@ class TestAPI(unittest.TestCase):
                     with api_module._demo_proposals_lock:
                         api_module._demo_proposals.pop(proposal_id, None)
 
+
+class TestSimulationAPI(unittest.TestCase):
+    def test_simulation_is_disabled_by_default(self):
+        with patch.dict("os.environ", {"SIMULATION_API_ENABLED": "false"}):
+            with patch("backend.api.get_candles") as get_candles:
+                response = app.test_client().post("/api/simulation/backtest")
+
+        self.assertEqual(response.status_code, 404)
+        data = response.get_json()
+        self.assertEqual(data["status"], "disabled")
+        self.assertFalse(data["trading_enabled"])
+        self.assertFalse(data["automatic_order_submitted"])
+        get_candles.assert_not_called()
+
+    def test_enabled_simulation_returns_results_without_trading(self):
+        candles = pd.DataFrame({"close": [4100.0]})
+        result = {"status": "ok", "trades_count": 3}
+
+        with patch.dict("os.environ", {"SIMULATION_API_ENABLED": "true"}):
+            with patch(
+                "backend.api.get_candles",
+                return_value=("XAUUSD", "5m", candles),
+            ):
+                with patch("backend.api.run_backtest", return_value=result):
+                    response = app.test_client().post(
+                        "/api/simulation/backtest"
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["symbol"], "XAUUSD")
+        self.assertEqual(data["timeframe"], "5m")
+        self.assertEqual(data["trades_count"], 3)
+        self.assertTrue(data["simulation_only"])
+        self.assertFalse(data["trading_enabled"])
+        self.assertFalse(data["automatic_order_submitted"])
+
+    def test_missing_candles_returns_service_unavailable(self):
+        with patch.dict("os.environ", {"SIMULATION_API_ENABLED": "true"}):
+            with patch(
+                "backend.api.get_candles",
+                return_value=("XAUUSD", "5m", pd.DataFrame()),
+            ):
+                response = app.test_client().post(
+                    "/api/simulation/backtest"
+                )
+
+        self.assertEqual(response.status_code, 503)
+        data = response.get_json()
+        self.assertFalse(data["trading_enabled"])
+        self.assertFalse(data["automatic_order_submitted"])
+
+    def test_invalid_backtest_data_returns_bad_request(self):
+        candles = pd.DataFrame({"close": [4100.0]})
+
+        with patch.dict("os.environ", {"SIMULATION_API_ENABLED": "true"}):
+            with patch(
+                "backend.api.get_candles",
+                return_value=("XAUUSD", "5m", candles),
+            ):
+                with patch(
+                    "backend.api.run_backtest",
+                    side_effect=ValueError("Invalid historical candles"),
+                ):
+                    response = app.test_client().post(
+                        "/api/simulation/backtest"
+                    )
+
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["trading_enabled"])
+        self.assertFalse(data["automatic_order_submitted"])
+
+    def test_unexpected_backtest_failure_returns_safe_error(self):
+        candles = pd.DataFrame({"close": [4100.0]})
+
+        with patch.dict("os.environ", {"SIMULATION_API_ENABLED": "true"}):
+            with patch(
+                "backend.api.get_candles",
+                return_value=("XAUUSD", "5m", candles),
+            ):
+                with patch(
+                    "backend.api.run_backtest",
+                    side_effect=RuntimeError("Simulated failure"),
+                ):
+                    response = app.test_client().post(
+                        "/api/simulation/backtest"
+                    )
+
+        self.assertEqual(response.status_code, 503)
+        data = response.get_json()
+        self.assertFalse(data["trading_enabled"])
+        self.assertFalse(data["automatic_order_submitted"])
+
 if __name__ == "__main__":
     unittest.main()
