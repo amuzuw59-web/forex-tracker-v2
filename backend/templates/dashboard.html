@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard · Forex Tracker v2</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #07111f; color: #edf7f6; }
+      body { margin: 0; background: #07111f; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; border-bottom: 1px solid #20394a; background: #0a1928; }
+      header strong { color: #55d6bf; }
+      header span { color: #a8c0c2; font-size: 13px; }
+      header a { color: #55d6bf; text-decoration: none; }
+      main { width: min(980px, calc(100% - 40px)); margin: 34px auto; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+      .card { padding: 22px; border: 1px solid #254354; border-radius: 14px; background: #0b1d2d; }
+      .label { color: #7da0a4; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+      .value { margin-top: 10px; font-size: 24px; font-weight: 700; }
+      .muted { color: #a8c0c2; }
+      .ok { color: #55d6bf; }
+      .warn { color: #f2c879; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #bcd1d1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Forex Tracker v2</strong>
+      <span>{{ user.get('email', 'Authenticated user') }} · <a href="{{ url_for('logout') }}">Log out</a></span>
+    </header>
+    <main>
+      <div class="grid">
+        <section class="card"><div class="label">Authentication</div><div class="value ok">Authenticated</div><div class="muted">Google OpenID Connect session</div></section>
+        <section class="card"><div class="label">Trading</div><div class="value ok">Disabled</div><div class="muted">Order submission remains fail-closed</div></section>
+        <section class="card"><div class="label">Market signal</div><div id="signal" class="value">Loading…</div><div id="detail" class="muted">Reading validated API data</div></section>
+      </div>
+      <section class="card" style="margin-top:16px"><div class="label">System response</div><pre id="raw">Loading…</pre></section>
+    </main>
+    <script>
+      fetch('/api/signal', { credentials: 'same-origin' })
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || 'Market signal unavailable.');
+          return data;
+        })
+        .then((data) => {
+          document.getElementById('signal').textContent = data.signal?.signal || 'Unavailable';
+          document.getElementById('detail').textContent = `${data.symbol} · ${data.timeframe} · ${data.candle_freshness || 'status unknown'}`;
+          document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
+        })
+        .catch((error) => {
+          document.getElementById('signal').textContent = 'Unavailable';
+          document.getElementById('signal').className = 'value warn';
+          document.getElementById('detail').textContent = error.message;
+          document.getElementById('raw').textContent = error.message;
+        });
+    </script>
+  </body>
+</html>

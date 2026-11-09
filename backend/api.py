@@ -4,9 +4,12 @@ import secrets
 import hmac
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+from authlib.integrations.flask_client import OAuth
 
 from backend.analysis import analyze_candles
 from backend.candlestick_tracker import track_next_move
@@ -14,8 +17,115 @@ from backend.data_provider import get_candles
 from backend.demo_executor import validate_signal_freshness, execute_demo_signal
 from backend.signal_identity import make_signal_identity
 from backend.backtester import run_backtest
+from backend.auth import (
+    configure_oauth,
+    current_user,
+    google_oauth_configured,
+    login_required,
+    safe_next_path,
+)
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config.update(
+    SECRET_KEY=os.getenv("SESSION_SECRET"),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=os.getenv("AUTH_COOKIE_SECURE", "true").lower() == "true",
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+)
+oauth = OAuth(app)
+configure_oauth(oauth)
+
+
+def _auth_error(message, status=503):
+    return render_template("login.html", error=message, next_path="/dashboard"), status
+
+
+def _google_callback_url():
+    return url_for("google_callback", _external=True, _scheme="https")
+
+
+@app.get("/login")
+def login():
+    if current_user() is not None:
+        return redirect(safe_next_path(request.args.get("next")))
+    return render_template(
+        "login.html",
+        error=request.args.get("error"),
+        next_path=safe_next_path(request.args.get("next")),
+    )
+
+
+@app.get("/auth/google")
+def google_login():
+    if not app.secret_key:
+        return _auth_error("Authentication is not configured on this server.")
+    if not google_oauth_configured():
+        return _auth_error("Google sign-in is not configured on this server.")
+
+    next_path = safe_next_path(request.args.get("next"))
+    session["oauth_next"] = next_path
+    try:
+        return oauth.google.authorize_redirect(_google_callback_url())
+    except Exception:
+        app.logger.exception("Unable to start Google OAuth")
+        session.pop("oauth_next", None)
+        return _auth_error("Google sign-in is temporarily unavailable.")
+
+
+@app.get("/auth/google/callback")
+def google_callback():
+    if request.args.get("error"):
+        session.pop("oauth_next", None)
+        return redirect(url_for("login", error="Google sign-in was cancelled or denied."))
+    if not app.secret_key or not google_oauth_configured():
+        return _auth_error("Google sign-in is not configured on this server.")
+
+    try:
+        token = oauth.google.authorize_access_token()
+        userinfo = token.get("userinfo")
+        if not isinstance(userinfo, dict):
+            userinfo = oauth.google.userinfo(token=token)
+        subject = userinfo.get("sub")
+        email = userinfo.get("email")
+        if not subject or not email or userinfo.get("email_verified") is not True:
+            raise ValueError("Google did not return a verified identity")
+    except Exception as exc:
+        app.logger.warning("Google OAuth callback rejected: %s", type(exc).__name__)
+        session.pop("oauth_next", None)
+        return redirect(
+            url_for("login", error="Google sign-in could not be verified. Please try again.")
+        )
+
+    next_path = safe_next_path(session.pop("oauth_next", None))
+    session.clear()
+    session.permanent = True
+    session["user"] = {
+        "sub": str(subject),
+        "email": str(email),
+        "name": str(userinfo.get("name") or email),
+        "picture": str(userinfo.get("picture") or ""),
+    }
+    return redirect(next_path)
+
+
+@app.get("/auth/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.get("/dashboard")
+@login_required
+def dashboard():
+    return render_template("dashboard.html", user=current_user())
+
+
+@app.get("/api/me")
+@login_required
+def me():
+    return jsonify({"status": "ok", "user": current_user()})
 
 
 @app.get("/")
@@ -27,6 +137,8 @@ def home():
         "automatic_trading": False,
         "endpoints": [
             "/health",
+            "/login",
+            "/dashboard",
             "/api/signal",
         ],
     })

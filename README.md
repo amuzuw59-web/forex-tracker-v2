@@ -32,6 +32,18 @@ Configure these variables locally in your .env file:
     METAAPI_TOKEN=your_metaapi_token
     METAAPI_ACCOUNT_ID=your_metaapi_account_id
 
+For Google sign-in on the Render deployment, configure these environment variables in
+Render (never commit their values):
+
+    GOOGLE_CLIENT_ID
+    GOOGLE_CLIENT_SECRET
+    SESSION_SECRET
+    AUTH_COOKIE_SECURE=true
+
+Register this exact HTTPS redirect URI in Google Cloud Console:
+
+    https://forex-tracker-v2.onrender.com/auth/google/callback
+
 Never commit your actual credentials.
 
 ## Run Locally
@@ -44,6 +56,12 @@ The local API normally listens on http://127.0.0.1:8080.
 
 - GET / — Service information
 - GET /health — Health check
+- GET /login — Google sign-in page
+- GET /auth/google — Start Google OpenID Connect
+- GET /auth/google/callback — Google OAuth callback
+- GET /auth/logout — Clear the authenticated session
+- GET /dashboard — Protected read-only dashboard
+- GET /api/me — Protected current-user session check
 - GET /api/signal — Generate a market signal
 - POST /api/demo/execute — Safety-gated demo execution
 

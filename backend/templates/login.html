@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in · Forex Tracker v2</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #07111f; color: #edf7f6; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 0%, #123046 0, #07111f 52%); }
+      main { width: min(420px, calc(100% - 40px)); padding: 34px; border: 1px solid #254354; border-radius: 18px; background: rgba(9, 25, 39, .94); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
+      .eyebrow { color: #55d6bf; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { margin: 10px 0; font-size: 30px; }
+      p { color: #a8c0c2; line-height: 1.55; }
+      .error { margin: 18px 0; padding: 12px 14px; border: 1px solid #9d4d57; border-radius: 10px; color: #ffd8d8; background: rgba(157,77,87,.16); }
+      a.button { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; margin-top: 24px; border-radius: 10px; background: #f3faf9; color: #10222c; font-weight: 700; text-decoration: none; }
+      a.button:hover { background: #55d6bf; }
+      small { display: block; margin-top: 22px; color: #759397; font-size: 12px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">Forex Tracker v2</div>
+      <h1>Sign in to continue</h1>
+      <p>Access the read-only market dashboard and monitoring status.</p>
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+      <a class="button" href="{{ url_for('google_login', next=next_path) }}">
+        <span aria-hidden="true">G</span>
+        Continue with Google
+      </a>
+      <small>Trading and order submission remain disabled. Authentication is handled securely by Google.</small>
+    </main>
+  </body>
+</html>
