@@ -51,6 +51,12 @@ class TestGoogleAuthentication(unittest.TestCase):
         with self.client.session_transaction() as session:
             self.assertNotIn("user", session)
 
+    def test_callback_error_is_not_500_without_session_secret(self):
+        app.secret_key = None
+        response = self.client.get("/auth/google/callback?error=access_denied")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+
     @patch.dict(
         os.environ,
         {

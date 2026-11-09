@@ -77,7 +77,8 @@ def google_login():
 @app.get("/auth/google/callback")
 def google_callback():
     if request.args.get("error"):
-        session.pop("oauth_next", None)
+        if app.secret_key:
+            session.pop("oauth_next", None)
         return redirect(url_for("login", error="Google sign-in was cancelled or denied."))
     if not app.secret_key or not google_oauth_configured():
         return _auth_error("Google sign-in is not configured on this server.")
